@@ -39,6 +39,17 @@ def srv_rpclist(ctx):
     command_ctl(ctx, "system.listMethods")
 
 
+@cli.command("rpchelp", short_help="Show the help text for rpc command")
+@click.argument("command", metavar="<command>")
+@pass_context
+def srv_rpchelp(ctx,command):
+    """Show the the help text for rpc command
+
+    \b
+    """
+    command_ctl(ctx, "system.methodHelp", [ command ])
+
+
 @cli.command("info", short_help="Show server info")
 @pass_context
 def srv_info(ctx):
@@ -83,3 +94,13 @@ def srv_ppdefines(ctx, full):
         command_ctl(ctx, "core.ppdefines_full")
     else:
         command_ctl(ctx, "core.ppdefines")
+
+
+@cli.command("shm", short_help="Show shared memory details")
+@pass_context
+def srv_shm(ctx):
+    """Show shared memory details
+
+    \b
+    """
+    command_ctl(ctx, "core.shmmem")

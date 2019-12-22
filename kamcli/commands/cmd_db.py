@@ -7,9 +7,63 @@ from sqlalchemy.exc import SQLAlchemyError
 from kamcli.cli import pass_context
 from kamcli.ioutils import ioutils_dbres_print
 from kamcli.ioutils import ioutils_formats_list
+from kamcli.dbutils import dbutils_exec_sqlfile
 
 
 CMD_BASE = "mysql -h {0} -u {1} -p{2} "
+
+KDB_GROUP_BASIC = ["standard"]
+
+KDB_GROUP_STANDARD = [
+    "acc",
+    "lcr",
+    "domain",
+    "group",
+    "permissions",
+    "registrar",
+    "usrloc",
+    "msilo",
+    "alias_db",
+    "uri_db",
+    "speeddial",
+    "avpops",
+    "auth_db",
+    "pdt",
+    "dialog",
+    "dispatcher",
+    "dialplan",
+    "topos",
+]
+
+KDB_GROUP_EXTRA = [
+    "imc",
+    "cpl",
+    "siptrace",
+    "domainpolicy",
+    "carrierroute",
+    "drouting",
+    "userblacklist",
+    "htable",
+    "purple",
+    "uac",
+    "pipelimit",
+    "mtree",
+    "sca",
+    "mohqueue",
+    "rtpproxy",
+    "rtpengine",
+    "secfilter",
+]
+
+KDB_GROUP_PRESENCE = ["presence", "rls"]
+
+KDB_GROUP_UID = [
+    "uid_auth_db",
+    "uid_avp_db",
+    "uid_domain",
+    "uid_gflags",
+    "uid_uri_db",
+]
 
 
 @click.group("db", help="Raw database operations")
@@ -18,7 +72,7 @@ def cli(ctx):
     pass
 
 
-@cli.command("connect", help="Launch db cli and connect to database")
+@cli.command("connect", short_help="Launch db cli and connect to database")
 @pass_context
 def db_connect(ctx):
     dbtype = ctx.gconfig.get("db", "type")
@@ -38,7 +92,7 @@ def db_connect(ctx):
     os.system(scmd)
 
 
-@cli.command("clirun", help="Run SQL statement via cli")
+@cli.command("clirun", short_help="Run SQL statement via cli")
 @click.argument("query", metavar="<query>")
 @pass_context
 def db_clirun(ctx, query):
@@ -60,7 +114,7 @@ def db_clirun(ctx, query):
     os.system(scmd)
 
 
-@cli.command("clishow", help="Show content of table via cli")
+@cli.command("clishow", short_help="Show content of table via cli")
 @click.argument("table", metavar="<table>")
 @pass_context
 def db_clishow(ctx, table):
@@ -82,7 +136,7 @@ def db_clishow(ctx, table):
     os.system(scmd)
 
 
-@cli.command("clishowg", help="Show content of table via cli")
+@cli.command("clishowg", short_help="Show content of table via cli")
 @click.argument("table", metavar="<table>")
 @pass_context
 def db_clishowg(ctx, table):
@@ -104,7 +158,7 @@ def db_clishowg(ctx, table):
     os.system(scmd)
 
 
-@cli.command("show", help="Show content of a table")
+@cli.command("show", short_help="Show content of a table")
 @click.option(
     "oformat",
     "--output-format",
@@ -129,7 +183,7 @@ def db_show(ctx, oformat, ostyle, table):
     ioutils_dbres_print(ctx, oformat, ostyle, res)
 
 
-@cli.command("showcreate", help="Show content of a table")
+@cli.command("showcreate", short_help="Show content of a table")
 @click.option(
     "oformat",
     "--output-format",
@@ -154,26 +208,7 @@ def db_showcreate(ctx, oformat, ostyle, table):
     ioutils_dbres_print(ctx, oformat, ostyle, res)
 
 
-def db_engine_exec_file(ctx, sqlengine, fname):
-    sql_file = open(fname, "r")
-    sql_command = ""
-    for line in sql_file:
-        if not line.startswith("--") and line.strip("\n"):
-            sql_command += line.strip("\n")
-            if sql_command.endswith(";"):
-                try:
-                    sqlengine.execute(text(sql_command))
-                    sqlengine.commit()
-                except SQLAlchemyError:
-                    ctx.log(
-                        "failed to execute sql statements from file [%s]",
-                        fname,
-                    )
-                finally:
-                    sql_command = ""
-
-
-@cli.command("runfile", help="Run SQL statements in a file")
+@cli.command("runfile", short_help="Run SQL statements in a file")
 @click.argument("fname", metavar="<fname>")
 @pass_context
 def db_runfile(ctx, fname):
@@ -185,4 +220,294 @@ def db_runfile(ctx, fname):
     """
     ctx.vlog("Run statements in the file [%s]", fname)
     e = create_engine(ctx.gconfig.get("db", "rwurl"))
-    db_engine_exec_file(ctx, e, fname)
+    dbutils_exec_sqlfile(ctx, e, fname)
+
+
+def db_create_host_users(
+    ctx, e, dbname, dbhost, dbrwuser, dbrwpassword, dbrouser, dbropassword
+):
+    e.execute(
+        "CREATE USER {0!r}@{1!r} IDENTIFIED BY {2!r}".format(
+            dbrwuser, dbhost, dbrwpassword
+        )
+    )
+    e.execute(
+        "GRANT ALL PRIVILEGES ON {0}.* TO {1!r}@{2!r}".format(
+            dbname, dbrwuser, dbhost
+        )
+    )
+    e.execute(
+        "CREATE USER {0!r}@{1!r} IDENTIFIED BY {2!r}".format(
+            dbrouser, dbhost, dbropassword
+        )
+    )
+    e.execute(
+        "GRANT SELECT PRIVILEGES ON {0}.* TO {1!r}@{2!r}".format(
+            dbname, dbrouser, dbhost
+        )
+    )
+
+
+def db_create_users(ctx, e, dbname):
+    dbhost = ctx.gconfig.get("db", "host")
+    dbrwuser = ctx.gconfig.get("db", "rwuser")
+    dbrwpassword = ctx.gconfig.get("db", "rwpassword")
+    dbrouser = ctx.gconfig.get("db", "rouser")
+    dbropassword = ctx.gconfig.get("db", "ropassword")
+    dbaccesshost = ctx.gconfig.get("db", "accesshost")
+    db_create_host_users(
+        ctx, e, dbname, dbhost, dbrwuser, dbrwpassword, dbrouser, dbropassword
+    )
+    if dbhost != "localhost":
+        db_create_host_users(
+            ctx,
+            e,
+            dbname,
+            "localhost",
+            dbrwuser,
+            dbrwpassword,
+            dbrouser,
+            dbropassword,
+        )
+    if len(dbaccesshost) > 0:
+        db_create_host_users(
+            ctx,
+            e,
+            dbname,
+            dbaccesshost,
+            dbrwuser,
+            dbrwpassword,
+            dbrouser,
+            dbropassword,
+        )
+
+
+def db_create_database(ctx, e, dbname):
+    e.execute("create database {0}".format(dbname))
+
+
+def db_create_group(ctx, e, dirpath, dbgroup):
+    for t in dbgroup:
+        fname = dirpath + "/" + t + "-create.sql"
+        dbutils_exec_sqlfile(ctx, e, fname)
+
+
+@cli.command("create", short_help="Create database structure")
+@click.option(
+    "dbname",
+    "--dbname",
+    default="",
+    help="Database name or path to the folder for database",
+)
+@click.option(
+    "directory",
+    "--directory",
+    default="",
+    help="Path to the directory with db schema files",
+)
+@pass_context
+def db_create(ctx, dbname, directory):
+    """Create database structure
+
+    \b
+    """
+    dbtype = ctx.gconfig.get("db", "type")
+    if dbtype != "mysql":
+        ctx.vlog("Database type [%s] not supported yet", dbtype)
+        return
+    ldbname = ctx.gconfig.get("db", "dbname")
+    if len(dbname) > 0:
+        ldbname = dbname
+    ldirectory = ""
+    if len(directory) > 0:
+        ldirectory = directory
+    ctx.vlog("Creating database [%s] structure", ldbname)
+    e = create_engine(ctx.gconfig.get("db", "adminurl"))
+    db_create_database(ctx, e, ldbname)
+    db_create_users(ctx, e, ldbname)
+    e.execute("use {0}".format(ldbname))
+    db_create_group(ctx, e, ldirectory, KDB_GROUP_BASIC)
+    db_create_group(ctx, e, ldirectory, KDB_GROUP_STANDARD)
+    print("Do you want to create extra tables? (y/n):", end=" ")
+    option = input()
+    if option == "y":
+        db_create_group(ctx, e, ldirectory, KDB_GROUP_EXTRA)
+    print("Do you want to create presence tables? (y/n):", end=" ")
+    option = input()
+    if option == "y":
+        db_create_group(ctx, e, ldirectory, KDB_GROUP_PRESENCE)
+    print("Do you want to create uid tables? (y/n):", end=" ")
+    option = input()
+    if option == "y":
+        db_create_group(ctx, e, ldirectory, KDB_GROUP_UID)
+
+
+@cli.command("create-dbonly", short_help="Create database only")
+@click.option(
+    "dbname",
+    "--dbname",
+    default="",
+    help="Database name or path to the folder for database",
+)
+@pass_context
+def db_create_dbonly(ctx, dbname):
+    """Create database only
+
+    \b
+    """
+    dbtype = ctx.gconfig.get("db", "type")
+    if dbtype != "mysql":
+        ctx.vlog("Database type [%s] not supported yet", dbtype)
+        return
+    ldbname = ctx.gconfig.get("db", "dbname")
+    if len(dbname) > 0:
+        ldbname = dbname
+    ctx.vlog("Creating only database [%s]", ldbname)
+    e = create_engine(ctx.gconfig.get("db", "adminurl"))
+    db_create_database(ctx, e, ldbname)
+    e.execute("use {0}".format(ldbname))
+
+
+def db_create_tables_list(ctx, directory, group):
+    dbtype = ctx.gconfig.get("db", "type")
+    if dbtype != "mysql":
+        ctx.vlog("Database type [%s] not supported yet", dbtype)
+        return
+    ldirectory = ""
+    if len(directory) > 0:
+        ldirectory = directory
+    e = create_engine(ctx.gconfig.get("db", "rwurl"))
+    db_create_group(ctx, e, ldirectory, group)
+
+
+@cli.command("create-tables-basic", short_help="Create basic database tables")
+@click.option(
+    "directory",
+    "--directory",
+    default="",
+    help="Path to the directory with db schema files",
+)
+@pass_context
+def db_create_tables_basic(ctx, directory):
+    """Create basic database tables
+
+    \b
+    """
+    db_create_tables_list(ctx, directory, KDB_GROUP_BASIC)
+
+
+@cli.command(
+    "create-tables-standard", short_help="Create standard database tables"
+)
+@click.option(
+    "directory",
+    "--directory",
+    default="",
+    help="Path to the directory with db schema files",
+)
+@pass_context
+def db_create_tables_standard(ctx, directory):
+    """Create standard database tables
+
+    \b
+    """
+    db_create_tables_list(ctx, directory, KDB_GROUP_STANDARD)
+
+
+@cli.command("create-tables-extra", short_help="Create extra database tables")
+@click.option(
+    "directory",
+    "--directory",
+    default="",
+    help="Path to the directory with db schema files",
+)
+@pass_context
+def db_create_tables_extra(ctx, directory):
+    """Create extra database tables
+
+    \b
+    """
+    db_create_tables_list(ctx, directory, KDB_GROUP_EXTRA)
+
+
+@cli.command(
+    "create-tables-presence", short_help="Create presence database tables"
+)
+@click.option(
+    "directory",
+    "--directory",
+    default="",
+    help="Path to the directory with db schema files",
+)
+@pass_context
+def db_create_tables_presence(ctx, directory):
+    """Create presence database tables
+
+    \b
+    """
+    db_create_tables_list(ctx, directory, KDB_GROUP_PRESENCE)
+
+
+@cli.command("create-tables-uid", short_help="Create uid database tables")
+@click.option(
+    "directory",
+    "--directory",
+    default="",
+    help="Path to the directory with db schema files",
+)
+@pass_context
+def db_create_tables_uid(ctx, directory):
+    """Create uid database tables
+
+    \b
+    """
+    db_create_tables_list(ctx, directory, KDB_GROUP_UID)
+
+
+@cli.command(
+    "create-tables-group",
+    short_help="Create the group of database tables for a specific extension",
+)
+@click.option(
+    "directory",
+    "--directory",
+    default="",
+    help="Path to the directory with db schema files",
+)
+@click.argument("gname", metavar="<gname>")
+@pass_context
+def db_create_tables_group(ctx, directory, gname):
+    """Create the group of database tables for a specific extension
+
+    \b
+    Parameters:
+        <gname> - the name of the group of tables
+    """
+    ldirectory = ""
+    if len(directory) > 0:
+        ldirectory = directory
+    e = create_engine(ctx.gconfig.get("db", "rwurl"))
+    fpath = ldirectory + "/" + gname + "-create.sql"
+    dbutils_exec_sqlfile(ctx, e, fpath)
+
+
+@cli.command("grant", short_help="Create db access users and grant privileges")
+@click.option(
+    "dbname", "--dbname", default="", help="Database name",
+)
+@pass_context
+def db_grant(ctx, dbname):
+    """Create db access users and grant privileges
+
+    \b
+    """
+    dbtype = ctx.gconfig.get("db", "type")
+    if dbtype != "mysql":
+        ctx.vlog("Database type [%s] not supported yet", dbtype)
+        return
+    ldbname = ctx.gconfig.get("db", "dbname")
+    if len(dbname) > 0:
+        ldbname = dbname
+    ctx.vlog("Creating only database [%s]", ldbname)
+    e = create_engine(ctx.gconfig.get("db", "adminurl"))
+    db_create_users(ctx, e, ldbname)
